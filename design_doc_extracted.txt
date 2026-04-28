@@ -1,0 +1,172 @@
+Global Philanthropy Dashboard
+Product Track Design Document
+DataGood x Data Science Society x Open Project  |  Spring 2026 Case Competition
+1. Overview
+This document outlines the design and implementation plan for the Product Track submission of the DataGood Data Analytics Case Competition. The deliverable is an interactive dashboard enabling policymakers and foundation leaders to explore global philanthropy funding patterns using the OECD dataset — over 110,000 international funding transactions spanning multiple years, countries, sectors, and donors.
+1.1 Tech Stack
+Tableau Public — primary dashboard and publishing platform
+Python / pandas — data preprocessing and cleaning pipeline
+GitHub — version control and submission artifact hosting
+2. Problem Statement
+Global philanthropic funding is complex and fragmented. Policymakers and foundation leaders need a clear, navigable view of where funding flows — across geographies, sectors, time periods, donors, and recipients — to make strategic decisions and identify gaps. The OECD dataset provides a rich, standardized view of this landscape, but its raw form is inaccessible to non-technical users.
+The dashboard must answer questions like:
+Which foundations are the top donors out of a given country?
+Which 5 countries receive the most funding for maternal health?
+How has global funding for climate change evolved over time?
+Which donor contributes most to infectious disease funding in India?
+2.1 Tech Stack
+OECD dataset (XLSX) — primary data source covering 110,000+ global funding transactions
+Python / pandas — initial exploration to confirm the dataset can answer each target question
+Tableau Public — the interface through which end users pose and answer these questions themselves
+3. Dataset Summary
+The OECD dataset contains standardized philanthropic grant data reported by foundations globally. Each row represents a funding transaction (grant or commitment) and is described by the following key fields:
+3.1 Tech Stack
+OECD XLSX source file — ingested directly into Python for inspection and cleaning
+Python / openpyxl + pandas — field-by-field validation, type coercion, and export to clean CSV
+Tableau / Power BI data source connector — imports the clean CSV with field aliases and data types pre-set
+4. Target Users & Personas
+4.1 Policymaker
+4.2 Foundation Leader
+4.3 Tech Stack
+Tableau Public — accessible via any browser with no login required, meeting non-technical policymaker needs
+Responsive layout design — optimised for desktop viewing in policy and foundation office environments
+Tooltip annotations — plain-language explanations on chart hover to reduce required data literacy
+5. Dashboard Architecture
+The dashboard is organised into four interconnected views, each serving a distinct analytical purpose. All views share a global filter panel so users can quickly slice by year range, region, sector, and donor country.
+5.1 Global Filters (Persistent Across All Views)
+Year / Time Range — slider or dropdown (single year or multi-year range; note: some foundations report 2020-2023 aggregate)
+Donor Country — filter by the foundation's country of legal base
+Region / Country — filter by recipient geography at macro or country level
+Sector — filter by OECD CRS sector (e.g., Health, Education, Environment)
+Type of Flow — cross-border vs. domestic philanthropy
+5.2 View 1: Global Overview Map
+Purpose: Immediate geographic orientation — show where money goes and how much.
+Choropleth world map coloured by total disbursements to each recipient country
+Hover tooltip shows: country name, total USD received, top sector, top donor
+Toggle between absolute amounts and per-capita funding (where population data available)
+Bar chart below map: Top 10 recipient countries ranked by disbursements
+5.3 View 2: Sector & Thematic Deep-Dive
+Purpose: Explore how funding is distributed across causes and flag thematic priorities.
+Treemap or stacked bar: funding by sector, drillable to subsector
+Line chart: funding trend over time for selected sector(s)
+Thematic overlays: toggle to highlight grants scoring 1 or 2 on gender, climate mitigation, climate adaptation, biodiversity, or nutrition markers
+SDG filter: show only grants tied to specific Sustainable Development Goals
+5.4 View 3: Donor Leaderboard
+Purpose: Identify which foundations are the largest contributors and where they give.
+Ranked table of top N donors by total disbursements (configurable N)
+Clicking a donor filters the map and sector views to show only that foundation's grants
+Donor profile card: country of origin, total giving, primary sectors, top recipient countries
+Comparison mode: select 2-3 donors side by side
+5.5 View 4: Recipient & Project Explorer
+Purpose: Discover which organisations and projects receive the most funding and why.
+Searchable, sortable table of grant recipients with columns: recipient name, total USD, sector, donor, country, year
+Filter by channel of delivery (NGO, multilateral, government, etc.)
+Expandable rows show project description and expected duration
+5.6 Tech Stack
+Tableau Public — dashboard actions for cross-filtering between views; parameter controls for metric toggles; filled map for choropleth
+Tableau calculated fields — dynamic aggregation of row_id-split sector records; null exclusion logic for thematic markers
+Power BI (alternative) — equivalent visuals via built-in map, matrix, and slicer components if Tableau is unavailable
+6. Evaluation Criteria Alignment
+6.1 Tech Stack
+Tableau Public — enables all four evaluation dimensions: insightful aggregations, polished layout, interactive filters, and creative parameters
+Python validation scripts — confirm computed totals match raw data, ensuring insightfulness criterion is backed by accurate numbers
+GitHub README — documents design decisions and data notes for judge reproducibility
+7. Data Preparation Notes
+The OECD dataset requires some preprocessing before loading into a dashboard tool:
+Deflated USD values (usd_disbursements_defl) should be used as the primary metric — these are already normalised to 2023 constant dollars for fair year-over-year comparison.
+Projects with multiple sector codes are split at the sector level (tracked by row_id). Aggregate these rows when computing total project funding to avoid double-counting.
+Foundations with NDA restrictions report data only in aggregate form with year = '2020-2023'. Treat these as a single time bucket and exclude from year-over-year trend calculations.
+Null values in marker columns (gender_marker, climate_change_mitigation, etc.) indicate non-screened projects — exclude nulls from thematic filter counts to avoid misleading zero results.
+The channel_reported_name field may differ from channel_name (standardised). Use channel_name for consistent grouping; show channel_reported_name in project detail views.
+7.1 Tech Stack
+Python / pandas — primary cleaning tool: deduplication on row_id, sector-split aggregation, null flagging, and USD deflation validation
+openpyxl — read raw OECD XLSX preserving multi-sheet structure before flattening to a single clean CSV
+Jupyter Notebook — reproducible cleaning pipeline with inline checks; exported as HTML for documentation
+Git — tracks each cleaning step so any data decision can be reviewed or rolled back
+8. Implementation Plan
+8.1 Tech Stack
+Tableau Desktop / Public — build and publish all four views with dashboard actions, parameters, and calculated fields
+Python — pre-build data validation: row counts, sum checks, and spot checks on top donor and country aggregates
+Figma (optional) — wireframe the layout of each view before building in Tableau to align the team on design before committing
+GitHub Actions (optional) — automate the Python cleaning script so the clean CSV is always regenerated from the raw OECD file
+9. Tech Stack
+Full summary of all tools and technologies used across the project pipeline, from raw data to published dashboard.
+9.1 Data Processing
+Python (pandas, openpyxl) — cleaning, deduplication, sector-split aggregation, and null handling on the raw OECD XLSX
+Jupyter Notebook — exploratory analysis and validation of computed aggregates before loading into the viz tool
+GitHub — version control for all preprocessing scripts and documentation
+9.2 Visualization & Dashboard
+Tableau Public (primary) — all four dashboard views, cross-filter actions, parameter controls, and choropleth map; free to publish with a shareable URL
+Power BI Service (alternative) — equivalent feature set if Tableau is unavailable; supports the same chart types and interactive filters
+9.3 Data Storage & Sharing
+Cleaned CSV / XLSX — output of the preprocessing pipeline; loaded directly into Tableau/Power BI as a flat file data source
+Google Drive or GitHub Releases — hosts the cleaned dataset and any supplementary files for reproducibility
+9.4 Collaboration & Submission
+Git / GitHub — branching workflow for parallel development of dashboard views and preprocessing scripts
+Zoom — finalist judging session (May 1, 9-10 AM) and async screen-recording for the submission video if required
+Submission form (email link) — one team member submits the public dashboard URL and GitHub repo link by the deadline
+10. Submission Checklist
+Dashboard published and accessible via a public link (Tableau Public or Power BI Service)
+All four views functional with working cross-filters and global filter panel
+GitHub repository link included if any preprocessing scripts are used
+One team member submits the form by April 27, 2026 at 11:59 PM
+Finalist invitation check on April 29 (date tentative); finalist judging Zoom May 1, 9-10 AM
+10.1 Tech Stack
+Tableau Public shareable URL — the primary submission artefact; confirm it loads publicly before submitting
+GitHub repository — include a README with setup instructions for any Python preprocessing scripts
+Submission form (emailed link) — one team member fills in URLs for the dashboard and repo by the deadline
+
+[TABLE 1]
+Submission Deadline: Monday, April 27, 2026 at 11:59 PM  |  Finalist Judging: May 1, 2026 (Zoom, 9-10 AM)
+
+[TABLE 2]
+Competition | DataGood / Data Science Society / Open Project Case Competition
+Track | Product Track (Track 2)
+Dataset | OECD Global Philanthropy Funding Dataset
+Deliverable | Functional interactive dashboard (Tableau, Power BI, or equivalent)
+Judged By | Gates Foundation, OECD Policy Analyst, Giving Tuesday Research Director
+
+[TABLE 3]
+Field | Description | Dashboard Use
+year | Year committed or disbursed | Time filter / trend lines
+organization_name | Funding foundation name | Donor filter & leaderboards
+country | Recipient country/territory | Geographic filter & map
+region_macro / region | Geographic region grouping | Continent-level aggregation
+usd_disbursements_defl | Disbursed USD (2023 constant) | Primary funding metric
+sector_description | Sector (health, climate, etc.) | Sector filter & breakdown
+subsector_description | Subsector classification | Granular sector drill-down
+grant_recipient_project_title | Recipient name or project title | Recipient exploration
+type_of_flow | Cross-border vs. domestic | Flow type segmentation
+gender_marker | Gender equality focus (0-2) | Thematic overlay
+climate_change_mitigation | Climate mitigation focus (0-2) | Thematic overlay
+climate_change_adaptation | Climate adaptation focus (0-2) | Thematic overlay
+sdg_focus | Relevant SDG targets | SDG alignment filter
+
+[TABLE 4]
+Goal | Understand funding gaps across regions and sectors to prioritize policy advocacy
+Key Questions | Which regions are underfunded? Which sectors are growing fastest?
+Needs | High-level summary views, geographic maps, trend lines, sector breakdowns
+
+[TABLE 5]
+Goal | Benchmark their foundation against peers and identify co-funding opportunities
+Key Questions | How does our giving compare to others? Where are the top recipients in our sector?
+Needs | Donor leaderboards, recipient tables, sector-level drill-downs, year-over-year views
+
+[TABLE 6]
+Criterion | How We Address It
+Insightfulness | Data-driven views answer the four key questions in the brief; thematic markers surface non-obvious patterns (e.g., gender-tagged funding by region)
+Dashboard Design | Clean 4-view layout with consistent colour system; persistent global filters; tooltips and labels on all charts; mobile-responsive where possible
+Functionality | Interactive filters on every dimension (geography, sector, donor, time, thematic markers); drill-down from macro to project level; cross-filter behaviour across charts
+Creativity & Depth | Thematic overlay system (SDGs, gender, climate), donor comparison mode, per-capita funding toggle, and project-level explorer go beyond standard BI templates
+
+[TABLE 7]
+Tool | Tableau Public (primary) or Power BI — both support all required chart types and publish shareable links
+Data Ingestion | Import cleaned XLSX/CSV into the tool; create calculated fields for aggregations and marker filtering
+View 1 (Map) | Built-in filled map + bar chart; parameter for metric toggle
+View 2 (Sector) | Treemap + line chart with sector parameter; thematic marker set filters
+View 3 (Donors) | Ranked bar/table + dashboard action for donor selection filter
+View 4 (Projects) | Text table with search/filter; detail tooltip or expandable view
+Polish | Consistent colour palette (teal/dark theme matching OECD aesthetic); annotated key charts; dashboard title + instructions
+
+[TABLE 8]
+Judges: Diptesh Soni (Gates Foundation) · Tomasso Larghetti (OECD) · Samir Khan (Giving Tuesday)
