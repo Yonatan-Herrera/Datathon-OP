@@ -12,6 +12,8 @@ import streamlit as st
 DATA_DIR = Path("data")
 DEFAULT_CSV = Path("OECD Dataset.xlsx - complete_p4d3_df.csv")
 
+GLOBAL_THEME_COLOR_SCALE = "Teal"
+
 
 @dataclass(frozen=True)
 class DataBundle:
@@ -155,6 +157,15 @@ def _sorted_unique(values: Iterable) -> list:
     return [str(v) for v in out]
 
 
+def pretty_label(s: str) -> str:
+    # Convert snake_case / weird casing into "Title Case" for display.
+    s = str(s or "").strip()
+    if not s:
+        return s
+    s = s.replace("_", " ").replace("  ", " ").strip()
+    return " ".join(w[:1].upper() + w[1:] for w in s.split(" "))
+
+
 def _is_numeric_series(s: pd.Series) -> bool:
     try:
         return pd.api.types.is_numeric_dtype(s)
@@ -221,6 +232,11 @@ class Filters:
     sdg_query: Optional[str]
 
 
+def _reset_global_filters(defaults: dict):
+    for k, v in defaults.items():
+        st.session_state[k] = v
+
+
 def build_filters(data: DataBundle) -> Filters:
     tx = data.transactions
 
@@ -232,40 +248,85 @@ def build_filters(data: DataBundle) -> Filters:
     sectors = _sorted_unique(tx.get("sector_description", pd.Series([], dtype="string")))
     flow_types = _sorted_unique(tx.get("type_of_flow", pd.Series([], dtype="string")))
 
+    defaults = {
+        "gf_years": years,
+        "gf_donor_countries": donor_countries,
+        "gf_donor_orgs": donor_orgs,
+        "gf_region_macros": region_macros,
+        "gf_countries": countries,
+        "gf_sectors": sectors,
+        "gf_flow_types": flow_types,
+        "gf_marker_field": "None",
+        "gf_marker_min": 1,
+        "gf_sdg_query": "",
+    }
+
     with st.sidebar:
+        st.markdown("## How to use")
+        with st.expander("Quick guide", expanded=True):
+            st.write(
+                "Use the **Global filters** to slice the dataset, then explore via the tabs:\n"
+                "- **Global overview**: where funding goes (country totals)\n"
+                "- **Sector deep-dive**: where funding is directed by sector + trends\n"
+                "- **Donors**: top donors + compare selected donors by sector\n"
+                "- **Explorer**: search and filter projects row-by-row"
+            )
+            st.write(
+                f"**Tip**: totals in the map/leaderboards are computed at the **project ({pretty_label('row_id')})** level to avoid double counting."
+            )
+
+        if st.button("Reset all global filters", use_container_width=True):
+            _reset_global_filters(defaults)
+            st.rerun()
+
         st.markdown("### Global filters")
 
-        sel_years = st.multiselect("Year", years, default=years)
-        sel_donor_countries = st.multiselect("Donor country", donor_countries, default=donor_countries)
-        sel_donor_orgs = st.multiselect("Donor (foundation)", donor_orgs, default=donor_orgs)
-        sel_region_macros = st.multiselect("Region (macro)", region_macros, default=region_macros)
-        sel_countries = st.multiselect("Recipient country", countries, default=countries)
-        sel_sectors = st.multiselect("Sector", sectors, default=sectors)
-        sel_flow_types = st.multiselect("Type of flow", flow_types, default=flow_types)
+        sel_years = st.multiselect("Year", years, default=years, key="gf_years")
+        sel_donor_countries = st.multiselect(
+            "Donor country", donor_countries, default=donor_countries, key="gf_donor_countries"
+        )
+        sel_donor_orgs = st.multiselect(
+            "Donor (foundation)", donor_orgs, default=donor_orgs, key="gf_donor_orgs"
+        )
+        sel_region_macros = st.multiselect(
+            "Region (macro)", region_macros, default=region_macros, key="gf_region_macros"
+        )
+        sel_countries = st.multiselect(
+            "Recipient country", countries, default=countries, key="gf_countries"
+        )
+        sel_sectors = st.multiselect("Sector", sectors, default=sectors, key="gf_sectors")
+        sel_flow_types = st.multiselect(
+            "Type of flow", flow_types, default=flow_types, key="gf_flow_types"
+        )
 
         st.divider()
         st.markdown("### Thematic overlays")
+        thematic_options = [
+            "None",
+            "gender_marker",
+            "climate_change_mitigation",
+            "climate_change_adaptation",
+            "environment",
+            "biodiversity",
+            "desertification",
+            "nutrition",
+        ]
         thematic_field = st.selectbox(
             "Marker field",
-            [
-                "None",
-                "gender_marker",
-                "climate_change_mitigation",
-                "climate_change_adaptation",
-                "environment",
-                "biodiversity",
-                "desertification",
-                "nutrition",
-            ],
+            thematic_options,
             index=0,
+            format_func=lambda x: "None" if x == "None" else pretty_label(x),
+            key="gf_marker_field",
         )
         thematic_min = None
         if thematic_field != "None":
-            thematic_min = st.radio("Minimum score", [1, 2], horizontal=True)
+            thematic_min = st.radio("Minimum score", [1, 2], horizontal=True, key="gf_marker_min")
 
         st.divider()
         st.markdown("### SDG filter")
-        sdg_query = st.text_input("Filter `sdg_focus` (substring match)", value="").strip()
+        sdg_query = st.text_input(
+            f"Filter {pretty_label('sdg_focus')} (substring match)", value="", key="gf_sdg_query"
+        ).strip()
 
     return Filters(
         years=set(sel_years) if len(sel_years) != len(years) else None,
@@ -311,14 +372,36 @@ def apply_filters(df: pd.DataFrame, f: Filters) -> pd.DataFrame:
 def view_global_overview(projects: pd.DataFrame):
     st.markdown("## Global overview map")
     st.caption(
-        "Map + Top recipients are computed from `row_id`-aggregated projects to avoid double counting."
+        f"Country totals are computed from **projects aggregated by {pretty_label('row_id')}** to avoid double counting."
     )
 
-    by_country = (
-        projects.groupby("country", dropna=False, as_index=False)["usd_disbursements_defl"]
-        .sum()
-        .sort_values("usd_disbursements_defl", ascending=False)
-    )
+    by_country = projects.groupby("country", dropna=False, as_index=False)["usd_disbursements_defl"].sum()
+
+    # Enrich tooltips with "top donor" and "top sector" within each country.
+    # Note: sectors in `projects` are stored as multi-value strings; explode so a project
+    # can contribute to each sector in the tooltip summary.
+    if "organization_name" in projects.columns:
+        top_donor = (
+            projects.groupby(["country", "organization_name"], as_index=False)["usd_disbursements_defl"]
+            .sum()
+            .sort_values(["country", "usd_disbursements_defl"], ascending=[True, False])
+            .drop_duplicates("country")[["country", "organization_name"]]
+            .rename(columns={"organization_name": "top_donor"})
+        )
+        by_country = by_country.merge(top_donor, on="country", how="left")
+
+    if "sector_description" in projects.columns:
+        exploded = _explode_multi_value_column(projects, "sector_description", sep="; ")
+        top_sector = (
+            exploded.groupby(["country", "sector_description"], as_index=False)["usd_disbursements_defl"]
+            .sum()
+            .sort_values(["country", "usd_disbursements_defl"], ascending=[True, False])
+            .drop_duplicates("country")[["country", "sector_description"]]
+            .rename(columns={"sector_description": "top_sector"})
+        )
+        by_country = by_country.merge(top_sector, on="country", how="left")
+
+    by_country = by_country.sort_values("usd_disbursements_defl", ascending=False)
 
     fig = px.choropleth(
         by_country,
@@ -326,7 +409,12 @@ def view_global_overview(projects: pd.DataFrame):
         locationmode="country names",
         color="usd_disbursements_defl",
         hover_name="country",
-        color_continuous_scale="Teal",
+        hover_data={
+            "usd_disbursements_defl": ":,.3f",
+            "top_sector": True if "top_sector" in by_country.columns else False,
+            "top_donor": True if "top_donor" in by_country.columns else False,
+        },
+        color_continuous_scale=GLOBAL_THEME_COLOR_SCALE,
         labels={"usd_disbursements_defl": "USD disbursements (deflated)"},
     )
     fig.update_layout(margin=dict(l=0, r=0, t=0, b=0))
@@ -351,6 +439,15 @@ def view_sector_deep_dive(transactions: pd.DataFrame):
         "Sector breakdowns use sector-split transaction rows. Multi-sector projects can contribute to multiple sectors."
     )
 
+    selected_for_trend = None
+    if "sector_description" in transactions.columns:
+        sector_opts = _sorted_unique(transactions["sector_description"].dropna().astype("string"))
+        selected_for_trend = st.selectbox(
+            "Trend sector (optional)",
+            ["All sectors"] + sector_opts,
+            index=0,
+        )
+
     by_sector = (
         transactions.groupby("sector_description", dropna=False, as_index=False)["usd_disbursements_defl"]
         .sum()
@@ -369,18 +466,18 @@ def view_sector_deep_dive(transactions: pd.DataFrame):
     st.plotly_chart(treemap, use_container_width=True)
 
     if "year" in transactions.columns:
-        trend = (
-            transactions.groupby(["year"], as_index=False)["usd_disbursements_defl"]
-            .sum()
-            .sort_values("year")
-        )
+        tdf = transactions
+        if selected_for_trend and selected_for_trend != "All sectors" and "sector_description" in tdf.columns:
+            tdf = tdf[tdf["sector_description"].astype("string") == selected_for_trend]
+
+        trend = tdf.groupby(["year"], as_index=False)["usd_disbursements_defl"].sum().sort_values("year")
         line = px.line(
             trend,
             x="year",
             y="usd_disbursements_defl",
             markers=True,
             labels={"usd_disbursements_defl": "USD disbursements (deflated)"},
-            title="Funding trend over time (filtered)",
+            title="Funding trend over time",
         )
         st.plotly_chart(line, use_container_width=True)
 
@@ -469,7 +566,11 @@ def view_donor_leaderboard(projects: pd.DataFrame):
                 )
                 .sort_index()
             )
-            st.dataframe(pivot, use_container_width=True)
+            st.dataframe(
+                pivot,
+                use_container_width=True,
+                column_config={c: st.column_config.NumberColumn(pretty_label(c), format="$%0.3f") for c in pivot.columns},
+            )
 
 
 def view_recipient_explorer(projects: pd.DataFrame):
@@ -489,7 +590,12 @@ def view_recipient_explorer(projects: pd.DataFrame):
             "Add column-specific filters here for more precise exploration (text contains, exact match, or numeric range)."
         )
         all_cols = [c for c in df.columns.tolist() if c not in {"project_description"}]
-        chosen_cols = st.multiselect("Columns to filter", all_cols, default=[])
+        chosen_cols = st.multiselect(
+            "Columns to filter",
+            all_cols,
+            default=[],
+            format_func=pretty_label,
+        )
 
         for col in chosen_cols:
             s = df[col]
@@ -498,19 +604,23 @@ def view_recipient_explorer(projects: pd.DataFrame):
             c1, c2 = st.columns([1, 3])
             with c1:
                 mode = st.selectbox(
-                    f"{col} filter type",
+                    f"{pretty_label(col)} filter type",
                     ["contains", "equals_any"] + (["range"] if is_num else []),
                     key=f"adv_mode_{col}",
                 )
 
             with c2:
                 if mode == "contains":
-                    v = st.text_input(f"{col} contains", value="", key=f"adv_contains_{col}")
+                    v = st.text_input(
+                        f"{pretty_label(col)} contains", value="", key=f"adv_contains_{col}"
+                    )
                     df = _apply_column_filter(df, col, mode, v)
                 elif mode == "equals_any":
                     # Limit option set to keep the UI responsive on high-cardinality columns.
                     options = _sorted_unique(s.dropna().astype("string").unique().tolist())[:300]
-                    v = st.multiselect(f"{col} equals any", options, default=[], key=f"adv_equals_{col}")
+                    v = st.multiselect(
+                        f"{pretty_label(col)} equals any", options, default=[], key=f"adv_equals_{col}"
+                    )
                     df = _apply_column_filter(df, col, mode, v)
                 elif mode == "range":
                     sn = pd.to_numeric(s, errors="coerce").dropna()
@@ -520,13 +630,15 @@ def view_recipient_explorer(projects: pd.DataFrame):
                         lo0 = float(sn.min())
                         hi0 = float(sn.max())
                         lo, hi = st.slider(
-                            f"{col} range",
+                            f"{pretty_label(col)} range",
                             min_value=lo0,
                             max_value=hi0,
                             value=(lo0, hi0),
                             key=f"adv_range_{col}",
                         )
                         df = _apply_column_filter(df, col, mode, (lo, hi))
+
+    st.caption(f"Showing **{len(df):,}** projects after Explorer-only filters.")
 
     cols = [
         "grant_recipient_project_title",
@@ -547,9 +659,18 @@ def view_recipient_explorer(projects: pd.DataFrame):
         use_container_width=True,
         hide_index=True,
         column_config={
+            "grant_recipient_project_title": st.column_config.TextColumn(pretty_label("grant_recipient_project_title")),
+            "sector_description": st.column_config.TextColumn(pretty_label("sector_description")),
+            "organization_name": st.column_config.TextColumn(pretty_label("organization_name")),
+            "country": st.column_config.TextColumn(pretty_label("country")),
+            "region_macro": st.column_config.TextColumn(pretty_label("region_macro")),
+            "year": st.column_config.TextColumn(pretty_label("year")),
+            "type_of_flow": st.column_config.TextColumn(pretty_label("type_of_flow")),
+            "channel_name": st.column_config.TextColumn(pretty_label("channel_name")),
+            "expected_duration": st.column_config.TextColumn(pretty_label("expected_duration")),
             "usd_disbursements_defl": st.column_config.NumberColumn(
-                "USD disbursements (deflated)", format="$%0.3f"
-            )
+                pretty_label("usd_disbursements_defl"), format="$%0.3f"
+            ),
         },
     )
 
@@ -574,10 +695,13 @@ def main():
         layout="wide",
     )
     st.title("Global Philanthropy Dashboard")
-    st.caption(
-        "Interactive web dashboard based on the OECD global philanthropy funding dataset. "
-        "Designed to mirror the 4-view architecture from `Global_Philanthropy_Dashboard_Design_Doc.docx`."
-    )
+    with st.expander("What am I looking at? (data + counting rules)", expanded=True):
+        st.write(
+            "**Two levels of data are used in this app:**\n"
+            f"- **Projects ({pretty_label('row_id')})**: used for totals/leaderboards/maps (avoids double counting).\n"
+            "- **Transactions (sector-split rows)**: used for sector breakdowns (a project can appear in multiple sectors).\n\n"
+            "**In the donor-by-sector comparison**, multi-sector projects are intentionally counted in **each** sector."
+        )
 
     data = load_data()
     f = build_filters(data)
@@ -586,10 +710,19 @@ def main():
     pr = apply_filters(data.projects, f)
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Projects (row_id)", f"{len(pr):,}")
+    k1.metric(f"Projects ({pretty_label('row_id')})", f"{len(pr):,}")
     k2.metric("Transactions (rows)", f"{len(tx):,}")
     k3.metric("Total disbursed", _money(float(pr["usd_disbursements_defl"].sum())))
     k4.metric("Recipient countries", f"{pr['country'].nunique(dropna=True):,}" if "country" in pr.columns else "—")
+
+    with st.expander("Try a few common questions", expanded=False):
+        st.write(
+            "These are examples of how to use the filters/tabs (no special logic — just guidance):\n"
+            "- **Top donors out of a country**: set **Donor country**, go to **Donors**.\n"
+            "- **Top recipient countries for a theme**: use **Sector** + optional **Marker field**, go to **Global overview**.\n"
+            "- **Trends over time**: pick a sector in **Sector deep-dive** and watch the line chart.\n"
+            "- **Find specific projects**: use **Explorer** search + Advanced filters."
+        )
 
     tab1, tab2, tab3, tab4 = st.tabs(
         ["Global overview", "Sector deep-dive", "Donors", "Explorer"]
@@ -602,14 +735,6 @@ def main():
         view_donor_leaderboard(pr)
     with tab4:
         view_recipient_explorer(pr)
-
-    st.divider()
-    st.markdown("### Notes")
-    st.write(
-        "- Primary metric is `usd_disbursements_defl` (deflated USD). "
-        "- The dataset included in this repo is already in CSV form. "
-        "- If you want faster startup, run `python scripts/prepare_data.py` to generate `data/*.parquet`."
-    )
 
 
 if __name__ == "__main__":
