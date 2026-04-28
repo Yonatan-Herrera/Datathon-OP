@@ -187,6 +187,26 @@ def _apply_column_filter(df: pd.DataFrame, col: str, mode: str, value):
     return df
 
 
+def _explode_multi_value_column(
+    df: pd.DataFrame, col: str, sep: str = "; "
+) -> pd.DataFrame:
+    """
+    Split a multi-value string column into multiple rows (explode).
+    Used to avoid 'Health; Environment' becoming its own category and instead
+    count the same project in both sectors when desired.
+    """
+    if col not in df.columns:
+        return df
+    out = df.copy()
+    s = out[col].astype("string")
+    out[col] = s.fillna("").map(
+        lambda x: [p.strip() for p in str(x).split(sep) if p.strip()]
+    )
+    out = out.explode(col, ignore_index=True)
+    out = out[out[col].astype("string").str.len() > 0]
+    return out
+
+
 @dataclass(frozen=True)
 class Filters:
     years: Optional[set[str]]
@@ -396,8 +416,15 @@ def view_donor_leaderboard(projects: pd.DataFrame):
 
     if sel:
         subset = projects[projects["organization_name"].isin(sel)]
+        # IMPORTANT: `projects` aggregates sector descriptions into a multi-value string
+        # (e.g., "Health; Environment"). For the donor-by-sector view we want to count
+        # a multi-sector donation in *each* sector, not as its own combined category.
+        subset_exploded = _explode_multi_value_column(subset, "sector_description", sep="; ")
+
         by = (
-            subset.groupby(["organization_name", "sector_description"], as_index=False)["usd_disbursements_defl"]
+            subset_exploded.groupby(["organization_name", "sector_description"], as_index=False)[
+                "usd_disbursements_defl"
+            ]
             .sum()
             .sort_values("usd_disbursements_defl", ascending=False)
         )
