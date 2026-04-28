@@ -155,6 +155,38 @@ def _sorted_unique(values: Iterable) -> list:
     return [str(v) for v in out]
 
 
+def _is_numeric_series(s: pd.Series) -> bool:
+    try:
+        return pd.api.types.is_numeric_dtype(s)
+    except Exception:
+        return False
+
+
+def _apply_column_filter(df: pd.DataFrame, col: str, mode: str, value):
+    if col not in df.columns:
+        return df
+
+    s = df[col]
+    if mode == "contains":
+        q = str(value or "").strip()
+        if not q:
+            return df
+        return df[s.astype("string").str.contains(q, case=False, na=False)]
+
+    if mode == "equals_any":
+        vals = value or []
+        if not vals:
+            return df
+        return df[s.astype("string").isin([str(v) for v in vals])]
+
+    if mode == "range":
+        lo, hi = value
+        sn = pd.to_numeric(s, errors="coerce")
+        return df[sn.notna() & (sn >= float(lo)) & (sn <= float(hi))]
+
+    return df
+
+
 @dataclass(frozen=True)
 class Filters:
     years: Optional[set[str]]
@@ -370,16 +402,47 @@ def view_donor_leaderboard(projects: pd.DataFrame):
             .sort_values("usd_disbursements_defl", ascending=False)
         )
         by = by[by["sector_description"].notna()]
+
+        st.markdown("### Selected donors by sector (clean view)")
+        top_k = st.slider("Show top K sectors", min_value=5, max_value=25, value=12, step=1)
+
+        # Pick top sectors by total across selected donors, then show grouped bars.
+        top_sectors = (
+            by.groupby("sector_description", as_index=False)["usd_disbursements_defl"]
+            .sum()
+            .sort_values("usd_disbursements_defl", ascending=False)
+            .head(top_k)["sector_description"]
+            .tolist()
+        )
+        by_top = by[by["sector_description"].isin(top_sectors)].copy()
+        by_top["sector_description"] = pd.Categorical(
+            by_top["sector_description"], categories=top_sectors[::-1], ordered=True
+        )
+
         fig = px.bar(
-            by.head(60),
+            by_top,
             x="usd_disbursements_defl",
             y="sector_description",
             color="organization_name",
+            barmode="group",
             orientation="h",
-            title="Selected donors by sector (top rows)",
             labels={"sector_description": "", "usd_disbursements_defl": "USD disbursements (deflated)"},
         )
+        fig.update_layout(legend_title_text="Donor")
         st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Show pivot table (sectors x donors)"):
+            pivot = (
+                by_top.pivot_table(
+                    index="sector_description",
+                    columns="organization_name",
+                    values="usd_disbursements_defl",
+                    aggfunc="sum",
+                    fill_value=0.0,
+                )
+                .sort_index()
+            )
+            st.dataframe(pivot, use_container_width=True)
 
 
 def view_recipient_explorer(projects: pd.DataFrame):
@@ -393,6 +456,50 @@ def view_recipient_explorer(projects: pd.DataFrame):
         desc = df.get("project_description", pd.Series([], dtype="string")).astype("string")
         mask = title.str.contains(q, case=False, na=False) | desc.str.contains(q, case=False, na=False)
         df = df[mask]
+
+    with st.expander("Advanced filters (any column)"):
+        st.caption(
+            "Add column-specific filters here for more precise exploration (text contains, exact match, or numeric range)."
+        )
+        all_cols = [c for c in df.columns.tolist() if c not in {"project_description"}]
+        chosen_cols = st.multiselect("Columns to filter", all_cols, default=[])
+
+        for col in chosen_cols:
+            s = df[col]
+            is_num = _is_numeric_series(s) or col in {"usd_disbursements_defl", "usd_commitment_defl"}
+
+            c1, c2 = st.columns([1, 3])
+            with c1:
+                mode = st.selectbox(
+                    f"{col} filter type",
+                    ["contains", "equals_any"] + (["range"] if is_num else []),
+                    key=f"adv_mode_{col}",
+                )
+
+            with c2:
+                if mode == "contains":
+                    v = st.text_input(f"{col} contains", value="", key=f"adv_contains_{col}")
+                    df = _apply_column_filter(df, col, mode, v)
+                elif mode == "equals_any":
+                    # Limit option set to keep the UI responsive on high-cardinality columns.
+                    options = _sorted_unique(s.dropna().astype("string").unique().tolist())[:300]
+                    v = st.multiselect(f"{col} equals any", options, default=[], key=f"adv_equals_{col}")
+                    df = _apply_column_filter(df, col, mode, v)
+                elif mode == "range":
+                    sn = pd.to_numeric(s, errors="coerce").dropna()
+                    if len(sn) == 0:
+                        st.write("No numeric values available for range filtering.")
+                    else:
+                        lo0 = float(sn.min())
+                        hi0 = float(sn.max())
+                        lo, hi = st.slider(
+                            f"{col} range",
+                            min_value=lo0,
+                            max_value=hi0,
+                            value=(lo0, hi0),
+                            key=f"adv_range_{col}",
+                        )
+                        df = _apply_column_filter(df, col, mode, (lo, hi))
 
     cols = [
         "grant_recipient_project_title",
